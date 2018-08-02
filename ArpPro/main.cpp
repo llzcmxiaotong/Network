@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netpacket/packet.h>
 
 using namespace std;
 
@@ -41,7 +42,30 @@ struct argMsg
     unsigned char senderMac[6];
     unsigned int senderIp;
     unsigned char targetMac[6];
-    unsigned int targetIp;
+    unsigned char targetIp[4];
+
+    void print()
+    {
+        printf("------------ether header----------\n");
+        printf("destMac: %02x:%02x:%02x:%02x:%02x:%02x\n", dstMac[0], dstMac[1], dstMac[2], dstMac[3], dstMac[4], dstMac[5]);
+        printf("srcMac: %02x:%02x:%02x:%02x:%02x:%02x\n", srcMac[0], srcMac[1], srcMac[2], srcMac[3], srcMac[4], srcMac[5]);
+        printf("arpType: %4x\n", htons(arpType));
+        printf("------------ether header end------\n");
+
+        printf("hwType: %4x\n", htons(hwType));
+        printf("ptType: %4x\n", htons(ptType));
+        printf("hwSize: %d\n", hwSize);
+        printf("ptSize: %d\n", ptSize);
+        printf("opt: %x\n", htons(opt));
+        printf("senderMac: %02x:%02x:%02x:%02x:%02x:%02x\n", senderMac[0], senderMac[1], senderMac[2], senderMac[3], senderMac[4], senderMac[5]);
+        in_addr addr;
+        addr.s_addr = senderIp;
+        printf("senderIp: %ux, src: %s\n", senderIp, inet_ntoa(addr));
+        printf("targetMac: %02x:%02x:%02x:%02x:%02x:%02x\n", targetMac[0], targetMac[1], targetMac[2], targetMac[3], targetMac[4], targetMac[5]);
+        // addr.s_addr = targetIp;
+        memcpy(&addr.s_addr, &targetIp, 4);
+        printf("targetIp: %ux, src: %s\n", targetIp, inet_ntoa(addr));
+    }
 } ARPMsg;
 
 char * safe_strncpy( char * dst, const char * src, size_t size)
@@ -112,8 +136,10 @@ int sendArp(unsigned int targetIp, unsigned int srcIp, unsigned char* srcMac, co
     int timeout_ms;
     int fd;
     int rv = 1;
-    struct sockaddr addr;
+    struct sockaddr_ll addr;
     struct argMsg arp;
+
+    printf("targetIp:%d, srcIp: %d, interface:%s", targetIp, srcIp, interface);
 
     fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ARP));
     if (fd < 0)
@@ -144,13 +170,28 @@ int sendArp(unsigned int targetIp, unsigned int srcIp, unsigned char* srcMac, co
     memcpy(&arp.targetIp, &targetIp, 4);
 
     memset(&addr, 0, sizeof(addr));
-    safe_strncpy(addr.sa_data, interface, sizeof(addr.sa_data));
+    addr.sll_family = PF_PACKET;
+    addr.sll_protocol = htons(ETH_P_ARP);
+    addr.sll_hatype = ARPHRD_ETHER;
+    addr.sll_halen = ETH_ALEN;
+    addr.sll_ifindex = 2;
+    // strncpy(addr.sll_addr, (char*) arp.dstMac, 6);
 
+    /*addr.sll_ifindex  = 2;
+    addr.sll_family   = PF_PACKET;
+    addr.sll_protocol = htons(ETH_P_ALL);*/
+
+    // strncpy(addr.sa_data, interface, strlen(interface));
+
+    arp.print();
+
+    printf("sizeof(addr): %d, sizeof(sockaddr_in): %d\n", sizeof(addr), sizeof(sockaddr_in));
+    printf("sizeof(arp):%d\n", sizeof(arp));
     int count = 0;
-    if ((count = sendto(fd, &arp, sizeof(arp), 0, &addr, sizeof(addr))) < 0)
+    if ((count = sendto(fd, &arp, sizeof(arp), 0, (struct sockaddr*)&addr, sizeof(addr))) < 0)
     {
-        perror("sendto fail");
-        printf("sendto fail");
+        perror("sendto fail\n");
+        printf("sendto fail\n");
     }
 
     printf("send count: %d\n", count);
@@ -163,20 +204,23 @@ ret:
 
 int main()
 {
-    unsigned int test_ip = inet_addr("192.168.9.2");
+    unsigned int test_ip = inet_addr("192.168.9.1");
     char interface[] = "ens33";
     unsigned int ip;
     unsigned char mac[6] = {0};
     read_interface(interface, NULL, &ip, mac);
 
-    printf("ip:%0x", ip);
+    printf("ip:%0x\n", ip, mac);
+    printf("mac: %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
 
     while (true)
     {
-        printf("send arp");
+        printf("send arp\n");
         sendArp(test_ip, ip, mac, interface);
         sleep(1);
     }
+
 
     return 0;
 }
